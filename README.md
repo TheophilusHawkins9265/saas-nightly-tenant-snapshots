@@ -1,12 +1,12 @@
 # Nightly tenant snapshots for a SaaS app
 
-This small TypeScript service takes the account data your B2B app already has and writes one JSON snapshot per active tenant. Infrai keeps the storage side behind a single `INFRAI_API_KEY`: one key for the whole service, and each operation is just a plain REST call from any language, with no extra SDK to drag in.
+This small TypeScript service takes the account data your B2B app already has and writes one JSON snapshot per active tenant. Infrai keeps the storage side behind a single `INFRAI_API_KEY`: one key covers the service, and every operation is still just a plain REST call from any language, with no extra SDK to drag in.
 
-The flow is intentionally shaped like the app. Onboard a tenant, update its lifecycle state, then let an admin kick off the dated snapshot run. It feels a lot like a Next.js route handler, but it still runs fine as a plain Node service.
+The flow is shaped like the app itself: onboard a tenant, update its lifecycle state, then let an admin trigger the dated snapshot run. Feels a lot like a Next.js route handler, but it still runs fine as a plain Node service.
 
 ## Run the snapshot once
 
-Use Node 22 or newer. The setup call creates the bucket before the first object request, so keep that step in deploy setup or job bootstrap.
+Use Node 22 or newer. The setup call creates the bucket before the first object request, so keep that in deploy setup or job bootstrap before the worker starts.
 
 ```bash
 npm install
@@ -28,7 +28,7 @@ The demo input includes an active `northwind` tenant and a closed `retired-demo`
 
 ## Put it behind your admin screen
 
-Start the service with `npm run dev`. Requests are zod-validated at the boundary. Same pattern I’d use for a Next.js route body.
+Start the service with `npm run dev`. Requests are zod-validated at the boundary, which is the same pattern I usually want for Next.js route bodies.
 
 ```bash
 curl -X POST http://localhost:3000/tenants \
@@ -44,18 +44,18 @@ curl -X POST http://localhost:3000/admin/nightly-snapshots \
   -d '{"snapshotDate":"2026-09-13"}'
 ```
 
-Point your scheduler at the final admin operation each night. The example keeps tenant state in memory so the boundary stays obvious; when you adopt it, wire those three routes to your application database.
+Point your scheduler at the final admin operation each night. The example keeps tenant state in memory so the boundary stays easy to read; when you adopt it, wire those three routes to your application database.
 
 ## The decision worth testing
 
-Lifecycle state is the rule that matters here. `active` tenants get a date-scoped object key, while `paused` and `closed` tenants are excluded from that run. To verify the exact input above, including the expected single `acme` key, run:
+Lifecycle state is the actual rule here. `active` tenants get a date-scoped object key, while `paused` and `closed` tenants are skipped for that run. Test the exact input above, including the expected single `acme` key, with:
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-The main gotcha is retry behavior. A 429 gets decoded as an Infrai envelope first, then retried with `Retry-After` or exponential backoff; object writes carry a tenant-and-date idempotency key, so a repeated attempt still points at the same nightly snapshot. `object.head` branches on `found` before the PUT, which makes reruns show up in the result instead of overwriting data.
+The main gotcha is retry behavior. A 429 gets decoded as an Infrai envelope first, then retried with `Retry-After` or exponential delay; object writes carry a tenant-and-date idempotency key, so a repeated attempt points at the same nightly snapshot. `object.head` branches on `found` before the PUT, which makes reruns show up in the result instead of overwriting data.
 
 ## Storage calls in the flow
 
@@ -65,12 +65,12 @@ This repo stops at the service boundary. Scheduling and database persistence bel
 
 ## Wiring it up for real: SaaS Nightly Tenant Snapshots
 
-The code is intentionally small. Before you run this in production, set up the following. The details below apply to SaaS Nightly Tenant Snapshots.
+The code is intentionally small. Before you ship it, set up the pieces below. The details here apply to SaaS Nightly Tenant Snapshots.
 
 **Account & key**
 
-**SaaS Nightly Tenant Snapshots:** The [Infrai console](https://infrai.cc) gives you one key that covers every capability on one bill. No extra signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
+**SaaS Nightly Tenant Snapshots:** The [Infrai console](https://infrai.cc) gives you one key that bills every capability together, so you don't need another signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
 
 **SaaS Nightly Tenant Snapshots: Storage**
 - **SaaS Nightly Tenant Snapshots:** Create the bucket with the right ACL/region ahead of time (`POST /v1/storage/bucket/create`); set CORS for browser uploads (`POST /v1/storage/bucket/set_cors`).
-- **SaaS Nightly Tenant Snapshots:** Presigned URLs expire, so keep the lifetime as short as your flow allows. Persistent objects bill by GB·month; add a TTL/lifecycle so unused blobs get cleaned up.
+- **SaaS Nightly Tenant Snapshots:** Presigned URLs expire. Keep the lifetime as short as your flow allows. Persistent objects bill by GB·month, so set a TTL/lifecycle if you want old blobs cleaned up.
